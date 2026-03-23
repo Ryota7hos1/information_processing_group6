@@ -46,24 +46,225 @@ The interaction between components follows the sequence below:
 Only valid actions are presented to the user, ensuring correctness of input and simplifying state management.
 \subsection*{Concurrency Control}
 To prevent race conditions, a turn-based locking mechanism is implemented using a shared turn counter. Only the FPGA corresponding to the active player is permitted to update the global state at any given time. This ensures consistency while avoiding conflicting updates.
-\section{A description of the performance metrics of your system. Which metrics should be used? Why?}
-The following metrics were used to measure the performance of our system.
+
+\section {Performance Evaluation}
+The following metrics should be used to measure the performance of our system:
 \begin{itemize}
-    \item End-to-end latency:
-    \item Frame rate (FPS):
-    \item Initial Load-Up Time:
-    \item Server round-trip time:
+	\item End-to-end latency:
+    	Measured from user input to visual output.
+    	This is critical for gameplay responsiveness.
+   	(Measured: ~20 ms)
+    	\item Frame rate (FPS):
+    	Determines smoothness of rendering.
+    	Hardware acceleration enables stable output (~60 FPS).
+    	\item Initial Load-Up Time:
+    	Time it takes to boot up the game.
+    	\item Server round-trip time:
+    	Measures communication delay between FPGA and server.
+   	Impacts synchronization accuracy. (Depends on synchronization frequency)
 \end{itemize}
-There are a couple of metrics to be used to measure the performance of our system. The first one is end-to-end latency from the user input to video output. The second one is the load-up time for the video output. We used a design in which we load the image as a RGB(?) file into verilog. This design makes it such that it takes time to change any of the images as we would have to regenerate bitstream every single time. But makes the load time a lot faster. We decided this was fine, since we wanted to extend more towards the functionality of the game than to add characters or visual effects for now.
+
+\newline
+\textbf{End-to-end latency}
+When considering end-to-end latency, we split it up into the following parts to analyze.
+\begin{itemize}
+	\item User Input to battle state calculation
+	\item FPGA to server battle state update
+	\item Server to FPGA battle state update
+	\item FPGA video output
+\end{itemize}
+
+The user input to battle state calculation has a latency of about XXns or microsec (JupyterNotebook input to hardware communication). Basically instant
+The FPGA to server and server to FPGA have the biggest latency of about XXms (FPGA to server communication through ethernet and IP internet sharing). The server to FPGA update may introduce even larger latency, due to the polling-based mechanism, each node periodically retrieves updates from the database, introducing delay determined by the polling
+interval.
+The FPGA video output has a latency of about XXmicroseconds? (avg time for rendering on FPGA video output)
+Overall, the end-to-end system latency is primarily limited by cloud communication and polling
+frequency, with the observed response time on the order of  milliseconds (depending on the polling interval)
+
+
+
+The hardware resource utilisation of the system after implementation is shown in Figure 2. The design
+uses approximately 47% of LUT resources, while flip-flop (FF) and LUTRAM usage remain minimal
+(around 1%). Clocking resources such as BUFG, MMCM, and PLL show moderate utilisation.
+The relatively high LUT usage is mainly due to the implementation of the battle engine and video
+rendering logic in hardware. The battle engine performs combinational state updates, while the renderer
+generates real-time visual output, both contributing to logic consumption.
+In contrast, the low FF usage indicates that the design relies largely on combinational logic rather than
+sequential elements such as finite state machines. This simplifies the design and reduces latency but
+may limit scalability for more complex future extensions.
+Overall, the resource utilisation is within acceptable limits, leaving sufficient headroom for further
+optimisation or feature expansion.
+
 \section{At least one diagram of your system’s architecture.}
 \section{Design decisions taken when implementing the system, and an evaluation on these design choices.}
 The point was to identify where the best place to optimize was when considering end-to-end latency and performance. 
 Where is the best place to optimize. Is it better than software? What improvements did we make in software. what did we prioritize because of these? 
-In our initial design, we were going to send our audio to ChatGPT's API and process that and get a result back. We decided that takes too long as we add time communicating with chatGPT, and generating a response. We considered making a Nerual Network on the FPGA next. We decided this wasn't worth it(worse performance) since we won't have that many streams of attacks going at once. (NN networks strength and how it doesn't match our design). We figured this is actually better on the cpu as a hash map so we implemented that. We had a version where we get the CPU to reneder the images. We had long delays when we loaded-up the design and a bit more delay on all the things since we were using a lot of cpu resources. SO we decided to make that hardware accelerated using custom IP blocks and IPs like rgb\_to\_dvi from the diligent library. We also had a version where we stored our images in BRAM and streamed it. In our initial plan we had audio processing in the form of speech to text conversion using whisperAPI. This took time because of cpu usage and we decided not to use it. 
+
+
+\section{Design decisions taken when implementing the system, and an evaluation on these design choices.}
+The key design objective of this system was minimising end-to-end latency, balancing flexibility and performance. To achieve this, we carefully evaluated which components should be implemented in hardware (FPGA) and which should remain in software (CPU/cloud). We always attemted to idetify where the best place to optimize was, when considering end-to-end latency and performance, and used our analysis on these to decided what to prioritize.
+
+\subsection{Hardware vs Software Partitioning}
+
+We identified that the critical path of the system is:
+\begin{center}
+User Input $\rightarrow$ Processing $\rightarrow$ Rendering
+\end{center}
+
+Operations on this path directly affect user-perceived latency. Therefore:
+\begin{itemize}
+\item Latency-critical components (rendering, state updates) were implemented in hardware
+\item Non-critical or flexible components (control logic, communication handling) were implemented in software
+\end{itemize}
+
+The PS, running Python in Jupyter Notebook, handles high-level control tasks such as user interaction
+and cloud synchronization. These components benefit from software’s rapid development cycle and ease
+of modification—for example, the button-based interface for team selection and attack actions can be
+updated without hardware redesign. Cloud communication with AWS DynamoDB is also naturally
+suited to software due to the complexity of networking protocols.
+In contrast, latency-sensitive operations, such as battle logic computation and video rendering, were
+implemented in the PL. Hardware execution ensures deterministic timing for gameplay by making damage
+calculation, state transitions, special-attack processing, and rendering, all run as dedicated hardware pipelines..
+These partitioning leverages the strengths of both domains: the PL provides efficient, real-time
+computation, while the PS offers flexible system coordination. The main trade-off is that hardware
+acceleration increases design complexity and reduces adaptability, whereas software-based cloud polling
+introduces latency and communication overhead.
+\subsection{Hardware}
+On the hardware, we have 2 main custom IPs:
+\begin{itemize}
+	\item Battle Engine IP
+	\item Video Render IP
+\end{itemize}
+The battle engine IP performs all game state updates, including damage computation and transitions between actions such as normal attack, special attack, and Pokémon switching. The benefit of making the battle engine on hardware was the scalability it brings rather than the latency. For example, we may have extended the project so that multiple characters may be attacked at once. By adding attributes and such for more complex computations, we would have reached a point where the hardware calculations of these would have had meaningful optimizations. An extension we could have done is to make FSM for how many pokemons a player has, win, loss, turn, which would make the local processing of data a lot more applicable.
+The video renderer IP generates real-time visual output by interpreting the encoded game state and
+rendering relevant information, such as active Pokémon and health status, directly to the display. (explored more deeply in subsubsection{} Rendering Optimisation)
+Both IP cores interface with the Processing System via memory-mapped I/O (MMIO), the PS writes
+input state and control signals, triggers computation, and reads back the updated results. This interface
+cleanly separates high-level control from hardware-accelerated computation and rendering.
+MMIO (AXI Lite) was selected as the PS–PL interface since the hardware IPs operate on small control
+words rather than continuous data streams. Compared to AXI Stream, AXI Lite provides a simpler and
+more suitable interface for event-driven computation.
+To further reduce communication overhead, the game state is packed into a 128-bit (extra bits for expandability) encoded format, minimizing MMIO transactions and improving overall efficiency.
+
+\subsection{Cloud}
+To enable communication between multiple FPGA nodes, a cloud-based approach was implemented
+using AWS DynamoDB as a centralised database. The global game state is stored in the cloud and
+shared between the two players.
+Each node periodically retrieves the latest state and updates it after performing actions such as attack or
+switching. A polling-based mechanism is used for synchronisation due to its simplicity and ease of
+implementation.
+Instead of direct FPGA-to-FPGA communication, a centralised cloud design was chosen to provide a
+single source of truth and avoid state inconsistency. It also allows future extensions such as additional
+players or ranking systems.
+While polling introduces some latency and communication overhead, it is acceptable for a turn-basedELEC50009 Information Processing Page 3game where strict real-time constraints are not required. Overall, this approach provides a simple and
+reliable solution for distributed state synchronisation.
+\subsection{limitations and tradeoff}
+\subsubsection{Audio Processing Design}
+Initially, we considered using external APIs (e.g. speech-to-text via cloud services) to process audio input. However, this introduced significant latency due to: 
+\begin{itemize}
+\item Network communication overhead
+\item Server-side processing delays
+\end{itemize}
+We would be prompting to get a number back and would have to make the result go through another layer of processing to ensure that we get what we want. These things were introducing a lot of latency so we decided the system may be better without audio-processing and decided to continue without it. Making a speech-to-text hardware IP may have worked but we ran out of time to implement that.
+
+\textbf{Text-to-damage converter}
+While we decided against implementing audio processing (speech to text), we still attempted to implement a text-to-damage converter, where the user may type a word for attack and use the damage associated to that word for inflicting damage.
+Since we decided using external APIs introduced too much latency, we initially decided to explore implementing a neural network on the FPGA. While this would remove network latency, it introduced:
+\begin{itemize}
+\item High hardware resource usage
+\item Unnecessary complexity for a limited input space
+\end{itemize}
+
+So, we continued to consider what we actually want the text-to-damage converter to do and figured out that a simple look-up table may be sufficient for this.
+We compared the  latency of a nerual network and that of a python and FPGA look-up table.
+For the task of outputting 1 single output per user action, the difference in latency between a nerual network on the FPGA, FPGA look-up table, and python look-up table were indistinguishable. In fact, we figured out that if we don’t optimize memory location and communication between hardware and software, a simple look-up table on python where all the elements can be in the cache may be faster.
+\newline
+Final decision:
+\begin{itemize}
+\item Use a CPU-based hash map for input handling
+\end{itemize}
+This approach provided:
+\begin{itemize}
+\item Constant-time lookup
+\item Lower latency than both cloud and FPGA-based neural network approaches
+\end{itemize}
+
+\subsubsection{Rendering Optimisation}
+
+An initial implementation used CPU-based rendering. This resulted in:
+\begin{itemize}
+\item High latency during scene updates
+\item CPU resource contention - other tasks ran very slow/could not run in a reasonable amount of time
+\item low FPS (〜3fps)
+\end{itemize}
+
+To address this, rendering was moved to hardware using:
+\begin{itemize}
+\item Custom FPGA IP blocks
+\item \texttt{rgb\_to\_dvi} for video output (digilent IP library)
+\end{itemize}
+
+This significantly improved:
+\begin{itemize}
+\item Frame rate stability (〜60fps)
+\item Rendering latency
+\end{itemize}
+
+\subsubsection{Image Storage Strategy}
+
+We evaluated two approaches:
+\begin{itemize}
+\item Storing images in BRAM and streaming them
+\item Embedding image data directly into the bitstream
+\end{itemize}
+
+The BRAM approach provided flexibility but introduced runtime overhead. The final design embeds image data in the bitstream, resulting in:
+\begin{itemize}
+\item Faster access at runtime
+\item Reduced latency in rendering
+\end{itemize}
+
+However, this comes at the cost of requiring bitstream regeneration when assets change.
+
+\subsection{Overall Evaluation}
+
+The final system prioritises:
+\begin{itemize}
+\item Low latency over flexibility
+\item Hardware acceleration for performance-critical tasks
+\item Software simplicity for control and communication
+\end{itemize}
+
+This hybrid approach allowed us to achieve a responsive system while maintaining reasonable implementation complexity and it reflects a trade-off between system complexity, performance, and development constraints
+
 \section{The approach taken to test your system.}
 We split the system into parts to test the system. We split the system into FPGA to Server communication, battle state calculation, FPGA to video output, and tested these subsystems separately before putting them together. We utilized our knowledge from previous labs to use a server and set it up so that the FPGA polls info from the server and loads it into registers. We implemented pushing info from FPGA to server at the same time. We rely on flags on the FPGA and those polled from the server to do certain actions and prohibit others. Using these flags and values loaded into the FPGA registers, we do battle state calculation. We send the battle state calculation over the server and after we re-poll the state from the server, we output video according to that. 
 The other things are "extensions", meaning that they are not in the critical flow of the system and can be taken out if needed.
+
+The system was implemented using a modular approach and our testing follows that.
+When implementing the system, we split the system up into multiple subsystems to later integrate them into one system.
+\textbf{Subsystems:}
+\begin{itemize}
+	\item FPGA $↔$ Server communication
+	\item Battle state computation
+	\item Video rendering pipeline
+	\item Synchronization logic
+\end{itemize}
+
+Testing methodology:
+- Each subsystem was validated independently
+- Integration testing was performed incrementally
+- Edge cases (e.g., simultaneous updates) were tested using turn flags
+
+\textbf{Independent Test}
+The battle engine IP was verifiedusing predefined input states to check correct damage, energy updates, and state transitions. The videorenderer IP was tested by supplying known states and verifying that the displayed output matched the expected game state. Cloud communication was tested by manually reading and writing states to DynamoDB. When discrepancies were observed, the corresponding module was refined iteratively.
+\textbf{Integration Test}
+The interaction between the subsystems were checked here. This included testing communication between the Processing System (PS) and Programmable Logic (PL) via MMIO, as well as verifying correct synchronisation of game states through the cloud. Issues such as inconsistent states or delayed updates were identified and resolved by adjusting data handling and polling logic.
+\textbf{Edge Case Test}
+Different gameplay scenarios were tested, including attack, special attack (with audio-based damage), switching
+Pokémon, and timeout conditions. Edge cases such as zero health and insufficient energy were also evaluated. When errors occurred (e.g., incorrect turn switching or state mismatch), the system was debugged and refined iteratively.
+This iterative testing approach ensured that each component functioned correctly before full system
+integration, improving overall system reliability.
 \section{At least one diagram or flow-chart describing your testing flow or approach.}
-\section{Resources utilised on the device, especially on the hardware resources.}
 
 \end{document}
