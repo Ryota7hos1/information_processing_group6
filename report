@@ -1,0 +1,69 @@
+\documentclass{article}
+\usepackage{graphicx} % Required for inserting images
+
+\title{Information Processing Report}
+\author{Ryota Hosokawa, Charlie Sampson}
+\date{March 2026}
+
+\begin{document}
+
+\maketitle
+
+\section{The Purpose of the System}
+The goal of this project is to develop an engaging, interactive FPGA-based battle game with minimised latency and a smooth user experience. Two FPGA nodes each serve as a combined battle-state calculator and video-output renderer. A cloud server acts as the central synchroniser, coordinating game state between both players in real time. The system is designed to maximise responsiveness while remaining extensible. Optional features such as audio-based move selection can be layered on top of the core architecture without disrupting the critical game loop.
+\section{Overall Architecture of the System}
+The system consists of two FPGA nodes and one cloud-based server, forming a distributed IoT architecture..
+\newline
+\subsection*{FPGAs}
+Each FPGA node is responsible for latency-critical operations:
+\begin{itemize}
+    \item Capturing user input via the Jupyter Notebook interface
+    \item Computing local game state updates (e.g., player actions)
+    \item Rendering video output using hardware-accelerated pipelines
+\end{itemize}
+\subsection*{Cloud Server}
+\begin{itemize}
+    \item Maintains the global game state shared between both players
+    \item Resolves updates from both nodes
+    \item Synchronises turns using a shared turn counter
+\end{itemize}
+\subsection*{Communication Model}
+Communication between FPGA nodes and the server is implemented using a polling-based approach:
+\begin{itemize}
+    \item Each FPGA periodically polls the server for updated game state
+    \item FPGA nodes push local updates to the server after processing user actions
+\end{itemize}
+\subsection*{System Interaction Flow}
+The interaction between components follows the sequence below:
+\begin{enumerate}
+    \item The user selects an action via buttons displayed in the Jupyter Notebook interface
+    \item The FPGA processes the input and computes the updated local battle state
+    \item The updated state is transmitted to the server
+    \item The server updates the global game state
+    \item The second FPGA polls the server and retrieves the updated state
+    \item The FPGA updates its registers and renders the new game state to the display
+\end{enumerate}
+Only valid actions are presented to the user, ensuring correctness of input and simplifying state management.
+\subsection*{Concurrency Control}
+To prevent race conditions, a turn-based locking mechanism is implemented using a shared turn counter. Only the FPGA corresponding to the active player is permitted to update the global state at any given time. This ensures consistency while avoiding conflicting updates.
+\section{A description of the performance metrics of your system. Which metrics should be used? Why?}
+The following metrics were used to measure the performance of our system.
+\begin{itemize}
+    \item End-to-end latency:
+    \item Frame rate (FPS):
+    \item Initial Load-Up Time:
+    \item Server round-trip time:
+\end{itemize}
+There are a couple of metrics to be used to measure the performance of our system. The first one is end-to-end latency from the user input to video output. The second one is the load-up time for the video output. We used a design in which we load the image as a RGB(?) file into verilog. This design makes it such that it takes time to change any of the images as we would have to regenerate bitstream every single time. But makes the load time a lot faster. We decided this was fine, since we wanted to extend more towards the functionality of the game than to add characters or visual effects for now.
+\section{At least one diagram of your system’s architecture.}
+\section{Design decisions taken when implementing the system, and an evaluation on these design choices.}
+The point was to identify where the best place to optimize was when considering end-to-end latency and performance. 
+Where is the best place to optimize. Is it better than software? What improvements did we make in software. what did we prioritize because of these? 
+In our initial design, we were going to send our audio to ChatGPT's API and process that and get a result back. We decided that takes too long as we add time communicating with chatGPT, and generating a response. We considered making a Nerual Network on the FPGA next. We decided this wasn't worth it(worse performance) since we won't have that many streams of attacks going at once. (NN networks strength and how it doesn't match our design). We figured this is actually better on the cpu as a hash map so we implemented that. We had a version where we get the CPU to reneder the images. We had long delays when we loaded-up the design and a bit more delay on all the things since we were using a lot of cpu resources. SO we decided to make that hardware accelerated using custom IP blocks and IPs like rgb\_to\_dvi from the diligent library. We also had a version where we stored our images in BRAM and streamed it. In our initial plan we had audio processing in the form of speech to text conversion using whisperAPI. This took time because of cpu usage and we decided not to use it. 
+\section{The approach taken to test your system.}
+We split the system into parts to test the system. We split the system into FPGA to Server communication, battle state calculation, FPGA to video output, and tested these subsystems separately before putting them together. We utilized our knowledge from previous labs to use a server and set it up so that the FPGA polls info from the server and loads it into registers. We implemented pushing info from FPGA to server at the same time. We rely on flags on the FPGA and those polled from the server to do certain actions and prohibit others. Using these flags and values loaded into the FPGA registers, we do battle state calculation. We send the battle state calculation over the server and after we re-poll the state from the server, we output video according to that. 
+The other things are "extensions", meaning that they are not in the critical flow of the system and can be taken out if needed.
+\section{At least one diagram or flow-chart describing your testing flow or approach.}
+\section{Resources utilised on the device, especially on the hardware resources.}
+
+\end{document}
